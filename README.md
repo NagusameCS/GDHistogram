@@ -4,7 +4,12 @@ Analyze typing behavior and detect anomalies in Google Docs revision history.
 
 ## 🚀 Quick Start
 
-### Option 1: Run in GitHub Codespaces
+### Option 1: Use GitHub Pages (No Server Required!)
+**[👉 Open GDHistogram](https://nagusame.github.io/GDHistogram/)**
+
+Works entirely in your browser - no backend needed!
+
+### Option 2: Run in GitHub Codespaces
 1. Click the green **Code** button → **Codespaces** → **Create codespace**
 2. Wait for setup, then run:
    ```bash
