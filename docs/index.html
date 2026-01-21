@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GDHistogram</title>
+    <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist@2.27.0/plotly.min.js"></script>
+    <script src="https://unpkg.com/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+    <style>
+        :root {
+            --bg: #fafafa;
+            --card: #ffffff;
+            --text: #1a1a1a;
+            --text-secondary: #666666;
+            --text-muted: #999999;
+            --border: #e5e5e5;
+            --accent: #1a1a1a;
+        }
+        
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            line-height: 1.6;
+        }
+        
+        .container { max-width: 720px; margin: 0 auto; padding: 60px 24px; }
+        
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 40px;
+            margin-bottom: 24px;
+        }
+        
+        .logo {
+            font-size: 14px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            margin-bottom: 32px;
+        }
+        
+        h1 { font-size: 32px; font-weight: 600; margin-bottom: 12px; }
+        h2 { font-size: 18px; font-weight: 600; margin: 32px 0 16px; }
+        p { color: var(--text-secondary); margin-bottom: 24px; }
+        
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            padding: 12px 24px;
+            font-size: 14px;
+            font-weight: 500;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            transition: all 0.15s;
+            text-decoration: none;
+        }
+        
+        .btn-primary { background: var(--accent); color: white; }
+        .btn-primary:hover { background: #333; }
+        .btn-secondary { background: transparent; color: var(--text); border: 1px solid var(--border); }
+        .btn + .btn { margin-left: 12px; }
+        
+        input[type="text"] {
+            width: 100%;
+            padding: 12px 16px;
+            font-size: 15px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin-bottom: 16px;
+        }
+        
+        input[type="text"]:focus { outline: none; border-color: var(--accent); }
+        
+        .input-label { display: block; font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-bottom: 8px; }
+        .input-hint { font-size: 12px; color: var(--text-muted); margin-top: -12px; margin-bottom: 16px; }
+        
+        .hidden { display: none !important; }
+        
+        .alert { padding: 16px; border-radius: 8px; margin-bottom: 24px; font-size: 14px; }
+        .alert-error { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+        
+        .divider { height: 1px; background: var(--border); margin: 32px 0; }
+        
+        .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 24px 0; }
+        .stat-card { text-align: center; padding: 20px 12px; background: var(--bg); border-radius: 8px; }
+        .stat-value { font-size: 28px; font-weight: 600; }
+        .stat-label { font-size: 12px; color: var(--text-muted); margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+        
+        .progress-bar { width: 100%; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; margin-top: 12px; }
+        .progress-fill { height: 100%; background: var(--accent); transition: width 0.3s; }
+        
+        .events-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        .events-table th { text-align: left; padding: 12px 16px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); border-bottom: 1px solid var(--border); }
+        .events-table td { padding: 14px 16px; border-bottom: 1px solid var(--border); color: var(--text-secondary); }
+        .events-table tr:last-child td { border-bottom: none; }
+        
+        .event-badge { display: inline-block; padding: 4px 10px; border-radius: 4px; font-size: 12px; font-weight: 500; background: var(--bg); border: 1px solid var(--border); }
+        .event-badge.anomaly { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
+        .event-badge.added { background: #f0fdf4; border-color: #bbf7d0; color: #166534; }
+        .event-badge.deleted { background: #fefce8; border-color: #fef08a; color: #854d0e; }
+        
+        #histogram { width: 100%; height: 320px; margin: 24px 0; background: #f5f5f5; border-radius: 8px; }
+        
+        .actions { display: flex; gap: 12px; margin-top: 32px; flex-wrap: wrap; }
+        
+        .setup-section { background: var(--bg); border-radius: 8px; padding: 20px; margin-bottom: 24px; }
+        .setup-section h3 { font-size: 13px; font-weight: 600; margin-bottom: 12px; }
+        .setup-section ol { margin: 0; padding-left: 20px; color: var(--text-secondary); font-size: 13px; }
+        .setup-section li { margin-bottom: 8px; }
+        .setup-section code { background: var(--card); padding: 2px 6px; border-radius: 4px; font-size: 12px; border: 1px solid var(--border); }
+        
+        @media (max-width: 600px) {
+            .container { padding: 24px 16px; }
+            .card { padding: 24px; }
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+            h1 { font-size: 24px; }
+            .actions { flex-direction: column; }
+            .btn + .btn { margin-left: 0; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div id="screen-welcome" class="card">
+            <div class="logo">GDHistogram</div>
+            <h1>Analyze Google Docs</h1>
+            <p>Detect typing patterns, anomalies, and revision history in any Google Document.</p>
+            
+            <div class="setup-section">
+                <h3>First-time setup</h3>
+                <ol>
+                    <li>Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console</a></li>
+                    <li>Add <code id="origin-url"></code> to Authorized JavaScript origins</li>
+                    <li>Add <code id="redirect-url"></code> to Authorized redirect URIs</li>
+                </ol>
+            </div>
+            
+            <label class="input-label">OAuth Client ID</label>
+            <input type="text" id="client-id-input" placeholder="your-client-id.apps.googleusercontent.com">
+            <div class="input-hint">Stored locally in your browser only</div>
+            
+            <button class="btn btn-primary" onclick="startAuth()">Sign in with Google</button>
+        </div>
+        
+        <div id="screen-document" class="card hidden">
+            <div class="logo">GDHistogram</div>
+            <h1>Enter Document URL</h1>
+            <p>Paste the link to the Google Doc you want to analyze.</p>
+            
+            <input type="text" id="doc-url" placeholder="https://docs.google.com/document/d/...">
+            <div id="doc-error" class="alert alert-error hidden"></div>
+            
+            <div class="actions">
+                <button class="btn btn-primary" onclick="analyzeDocument()">Analyze</button>
+                <button class="btn btn-secondary" onclick="signOut()">Sign out</button>
+            </div>
+        </div>
+        
+        <div id="screen-analyzing" class="card hidden">
+            <div class="logo">GDHistogram</div>
+            <h1>Analyzing</h1>
+            <p id="analysis-status">Starting...</p>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
+            </div>
+        </div>
+        
+        <div id="screen-results" class="card hidden">
+            <div class="logo">GDHistogram</div>
+            <h1>Analysis Complete</h1>
+            
+            <div class="stats-grid" id="stats-grid"></div>
+            <div class="divider"></div>
+            
+            <h2>Typing Speed Distribution</h2>
+            <div id="histogram"></div>
+            
+            <div class="divider"></div>
+            
+            <h2>Detected Anomalies</h2>
+            <p id="anomaly-summary"></p>
+            <table class="events-table">
+                <thead>
+                    <tr><th>Type</th><th>Time</th><th>Deviation</th><th>Details</th></tr>
+                </thead>
+                <tbody id="events-body"></tbody>
+            </table>
+            
+            <div class="actions">
+                <button class="btn btn-primary" onclick="exportPDF()">Export Detailed Report (PDF)</button>
+                <button class="btn btn-secondary" onclick="exportJSON()">Export JSON</button>
+                <button class="btn btn-secondary" onclick="showScreen('document')">New Analysis</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const SCOPES = 'https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/documents.readonly';
+        const REDIRECT_URI = window.location.origin + window.location.pathname;
+        
+        let accessToken = null;
+        let analysisResults = null;
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('origin-url').textContent = window.location.origin;
+            document.getElementById('redirect-url').textContent = REDIRECT_URI;
+            
+            const savedClientId = localStorage.getItem('gdhistogram_client_id');
+            const defaultClientId = '646422605911-t7mnbg107rvv7ji9mqc5ajstfmnnggkv.apps.googleusercontent.com';
+            document.getElementById('client-id-input').value = savedClientId || defaultClientId;
+            
+            if (window.location.hash.includes('access_token')) {
+                handleAuthCallback(window.location.hash);
+            }
+        });
+        
+        function showScreen(name) {
+            document.querySelectorAll('.card').forEach(el => el.classList.add('hidden'));
+            document.getElementById('screen-' + name).classList.remove('hidden');
+        }
+        
+        function startAuth() {
+            const clientId = document.getElementById('client-id-input').value.trim();
+            if (!clientId) { alert('Please enter your OAuth Client ID'); return; }
+            
+            localStorage.setItem('gdhistogram_client_id', clientId);
+            
+            window.location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + new URLSearchParams({
+                client_id: clientId,
+                redirect_uri: REDIRECT_URI,
+                response_type: 'token',
+                scope: SCOPES,
+                prompt: 'consent'
+            });
+        }
+        
+        function handleAuthCallback(hash) {
+            const params = new URLSearchParams(hash.substring(1));
+            accessToken = params.get('access_token');
+            if (accessToken) {
+                history.replaceState(null, '', window.location.pathname);
+                showScreen('document');
+            }
+        }
+        
+        function signOut() { accessToken = null; showScreen('welcome'); }
+        
+        async function analyzeDocument() {
+            const docUrl = document.getElementById('doc-url').value.trim();
+            const errorDiv = document.getElementById('doc-error');
+            errorDiv.classList.add('hidden');
+            
+            const fileId = extractFileId(docUrl);
+            if (!fileId) {
+                errorDiv.textContent = 'Please enter a valid Google Docs URL';
+                errorDiv.classList.remove('hidden');
+                return;
+            }
+            
+            showScreen('analyzing');
+            
+            try {
+                updateProgress('Fetching document info...', 10);
+                const docInfo = await fetchDocumentInfo(fileId);
+                
+                updateProgress('Fetching revisions...', 20);
+                const revisions = await fetchRevisions(fileId);
+                
+                if (revisions.length < 2) {
+                    throw new Error('Document needs at least 2 revisions for analysis');
+                }
+                
+                updateProgress('Fetching current content...', 40);
+                const currentContent = await fetchCurrentContent(fileId);
+                
+                updateProgress('Computing metrics...', 60);
+                const metrics = computeMetrics(revisions);
+                
+                updateProgress('Detecting anomalies...', 80);
+                const anomalies = detectAnomalies(metrics);
+                
+                updateProgress('Done', 100);
+                
+                analysisResults = {
+                    fileId,
+                    docInfo,
+                    revisions,
+                    currentContent,
+                    metrics,
+                    anomalies,
+                    analyzedAt: new Date().toISOString()
+                };
+                
+                displayResults();
+                showScreen('results');
+                
+            } catch (error) {
+                console.error('Analysis error:', error);
+                errorDiv.textContent = error.message;
+                errorDiv.classList.remove('hidden');
+                showScreen('document');
+            }
+        }
+        
+        function extractFileId(url) {
+            const match = url.match(/\/document\/d\/([a-zA-Z0-9_-]+)/) || url.match(/id=([a-zA-Z0-9_-]+)/) || url.match(/^([a-zA-Z0-9_-]{20,})$/);
+            return match ? match[1] : null;
+        }
+        
+        function updateProgress(status, percent) {
+            document.getElementById('analysis-status').textContent = status;
+            document.getElementById('progress-fill').style.width = percent + '%';
+        }
+        
+        async function fetchDocumentInfo(fileId) {
+            const response = await fetch(
+                `https://www.googleapis.com/drive/v3/files/${fileId}?fields=name,createdTime,modifiedTime,owners`,
+                { headers: { 'Authorization': 'Bearer ' + accessToken } }
+            );
+            if (!response.ok) throw new Error('Failed to fetch document info');
+            return response.json();
+        }
+        
+        async function fetchRevisions(fileId) {
+            const response = await fetch(
+                `https://www.googleapis.com/drive/v3/files/${fileId}/revisions?fields=revisions(id,modifiedTime,lastModifyingUser,size)`,
+                { headers: { 'Authorization': 'Bearer ' + accessToken } }
+            );
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.error?.message || 'Failed to fetch revisions');
+            }
+            const data = await response.json();
+            return data.revisions || [];
+        }
+        
+        async function fetchCurrentContent(fileId) {
+            try {
+                const response = await fetch(
+                    `https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=text/plain`,
+                    { headers: { 'Authorization': 'Bearer ' + accessToken } }
+                );
+                if (response.ok) return await response.text();
+            } catch (e) {}
+            return '';
+        }
+        
+        function computeMetrics(revisions) {
+            const metrics = [];
+            
+            for (let i = 1; i < revisions.length; i++) {
+                const prev = revisions[i - 1];
+                const curr = revisions[i];
+                
+                const prevSize = parseInt(prev.size) || 0;
+                const currSize = parseInt(curr.size) || 0;
+                const sizeChange = currSize - prevSize;
+                
+                const prevTime = new Date(prev.modifiedTime);
+                const currTime = new Date(curr.modifiedTime);
+                const timeDiffMinutes = Math.max(0.1, (currTime - prevTime) / 60000);
+                
+                const cpm = Math.abs(sizeChange) / timeDiffMinutes;
+                
+                metrics.push({
+                    revision: i + 1,
+                    timestamp: currTime,
+                    timeDiffMinutes,
+                    sizeChange,
+                    charsAdded: Math.max(0, sizeChange),
+                    charsDeleted: Math.max(0, -sizeChange),
+                    cpm,
+                    user: curr.lastModifyingUser?.displayName || 'Unknown'
+                });
+            }
+            
+            return metrics;
+        }
+        
+        function detectAnomalies(metrics) {
+            const anomalies = [];
+            if (metrics.length === 0) return anomalies;
+            
+            const cpms = metrics.filter(m => m.cpm > 0).map(m => m.cpm);
+            const sizes = metrics.map(m => Math.abs(m.sizeChange));
+            
+            const avgCpm = cpms.reduce((a, b) => a + b, 0) / cpms.length || 0;
+            const stdCpm = Math.sqrt(cpms.reduce((a, b) => a + Math.pow(b - avgCpm, 2), 0) / cpms.length) || 1;
+            
+            const avgSize = sizes.reduce((a, b) => a + b, 0) / sizes.length || 0;
+            const stdSize = Math.sqrt(sizes.reduce((a, b) => a + Math.pow(b - avgSize, 2), 0) / sizes.length) || 1;
+            
+            for (const m of metrics) {
+                const cpmZ = m.cpm > 0 ? (m.cpm - avgCpm) / stdCpm : 0;
+                const sizeZ = (Math.abs(m.sizeChange) - avgSize) / stdSize;
+                
+                if (cpmZ > 1.5 && m.cpm > 300) {
+                    anomalies.push({
+                        type: 'Anomaly',
+                        severity: cpmZ > 3 ? 'high' : cpmZ > 2 ? 'medium' : 'low',
+                        timestamp: m.timestamp,
+                        zScore: cpmZ,
+                        metric: m,
+                        reason: 'Typing speed ' + m.cpm.toFixed(0) + ' CPM is ' + cpmZ.toFixed(1) + ' std dev above average (' + avgCpm.toFixed(0) + ' CPM)',
+                        interpretation: cpmZ > 3 ? 'Extremely suspicious - likely copy/paste or AI-generated content' : 
+                                       cpmZ > 2 ? 'Suspicious - unusually fast, possibly pasted content' : 
+                                       'Slightly unusual speed - worth noting'
+                    });
+                }
+                
+                if (m.sizeChange > 500 && sizeZ > 1.5) {
+                    anomalies.push({
+                        type: 'Large Addition',
+                        severity: sizeZ > 3 ? 'high' : sizeZ > 2 ? 'medium' : 'low',
+                        timestamp: m.timestamp,
+                        zScore: sizeZ,
+                        metric: m,
+                        reason: 'Added ' + m.sizeChange.toLocaleString() + ' characters (' + sizeZ.toFixed(1) + ' std dev above average)',
+                        interpretation: 'Large content additions may indicate pasted or externally-sourced content'
+                    });
+                }
+                
+                if (m.sizeChange < -500 && sizeZ > 1.5) {
+                    anomalies.push({
+                        type: 'Large Deletion',
+                        severity: sizeZ > 3 ? 'high' : 'medium',
+                        timestamp: m.timestamp,
+                        zScore: sizeZ,
+                        metric: m,
+                        reason: 'Deleted ' + Math.abs(m.sizeChange).toLocaleString() + ' characters',
+                        interpretation: 'Large deletions may indicate content restructuring or removal of pasted content'
+                    });
+                }
+                
+                if (m.timeDiffMinutes > 60) {
+                    anomalies.push({
+                        type: 'Long Pause',
+                        severity: m.timeDiffMinutes > 1440 ? 'high' : 'low',
+                        timestamp: m.timestamp,
+                        zScore: 0,
+                        metric: m,
+                        reason: formatDuration(m.timeDiffMinutes) + ' gap between revisions',
+                        interpretation: 'Extended breaks may indicate work sessions or external content preparation'
+                    });
+                }
+            }
+            
+            return anomalies.sort((a, b) => (b.zScore || 0) - (a.zScore || 0));
+        }
+        
+        function formatDuration(minutes) {
+            if (minutes < 60) return Math.round(minutes) + ' minutes';
+            if (minutes < 1440) return (minutes / 60).toFixed(1) + ' hours';
+            return (minutes / 1440).toFixed(1) + ' days';
+        }
+        
+        function displayResults() {
+            const { metrics, anomalies, currentContent, docInfo } = analysisResults;
+            
+            const totalChars = metrics.reduce((a, m) => a + m.charsAdded, 0);
+            const cpms = metrics.filter(m => m.cpm > 0 && m.cpm < 2000).map(m => m.cpm);
+            const avgCpm = cpms.length > 0 ? cpms.reduce((a, b) => a + b, 0) / cpms.length : 0;
+            const wordCount = currentContent.split(/\s+/).filter(w => w.length > 0).length;
+            
+            document.getElementById('stats-grid').innerHTML = 
+                '<div class="stat-card"><div class="stat-value">' + (metrics.length + 1) + '</div><div class="stat-label">Revisions</div></div>' +
+                '<div class="stat-card"><div class="stat-value">' + wordCount.toLocaleString() + '</div><div class="stat-label">Words</div></div>' +
+                '<div class="stat-card"><div class="stat-value">' + avgCpm.toFixed(0) + '</div><div class="stat-label">Avg CPM</div></div>' +
+                '<div class="stat-card"><div class="stat-value">' + anomalies.length + '</div><div class="stat-label">Anomalies</div></div>';
+            
+            // Histogram
+            const histogramDiv = document.getElementById('histogram');
+            if (cpms.length > 0 && typeof Plotly !== 'undefined') {
+                try {
+                    Plotly.newPlot('histogram', [{
+                        x: cpms,
+                        type: 'histogram',
+                        marker: { color: '#1a1a1a' },
+                        nbinsx: Math.min(30, Math.max(10, Math.floor(cpms.length / 2)))
+                    }], {
+                        xaxis: { title: 'Characters Per Minute', gridcolor: '#e5e5e5' },
+                        yaxis: { title: 'Frequency', gridcolor: '#e5e5e5' },
+                        margin: { t: 20, r: 20, b: 50, l: 50 },
+                        paper_bgcolor: 'transparent',
+                        plot_bgcolor: 'transparent',
+                        bargap: 0.1,
+                        font: { family: 'system-ui', color: '#1a1a1a' }
+                    }, { responsive: true, displayModeBar: false });
+                } catch (e) {
+                    console.error('Plotly error:', e);
+                    histogramDiv.innerHTML = '<p style="text-align:center;padding:40px;color:#999;">Chart unavailable</p>';
+                }
+            } else {
+                histogramDiv.innerHTML = '<p style="text-align:center;padding:40px;color:#999;">No data for histogram</p>';
+            }
+            
+            const highCount = anomalies.filter(a => a.severity === 'high').length;
+            const medCount = anomalies.filter(a => a.severity === 'medium').length;
+            document.getElementById('anomaly-summary').textContent = anomalies.length === 0 
+                ? 'No significant anomalies detected. The document appears to have consistent typing patterns.'
+                : 'Found ' + anomalies.length + ' anomalies: ' + highCount + ' high severity, ' + medCount + ' medium severity, ' + (anomalies.length - highCount - medCount) + ' low severity.';
+            
+            const tbody = document.getElementById('events-body');
+            if (anomalies.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#999;padding:40px;">No anomalies detected</td></tr>';
+            } else {
+                let html = '';
+                anomalies.slice(0, 25).forEach(a => {
+                    const badgeClass = a.type === 'Anomaly' ? 'anomaly' : (a.type.includes('Addition') ? 'added' : '');
+                    html += '<tr>' +
+                        '<td><span class="event-badge ' + badgeClass + '">' + a.type + '</span></td>' +
+                        '<td>' + a.timestamp.toLocaleDateString() + ' ' + a.timestamp.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) + '</td>' +
+                        '<td>' + (a.zScore ? a.zScore.toFixed(1) + ' std' : '-') + '</td>' +
+                        '<td>' + a.reason + '</td>' +
+                        '</tr>';
+                });
+                tbody.innerHTML = html;
+            }
+        }
+        
+        function exportJSON() {
+            const blob = new Blob([JSON.stringify(analysisResults, null, 2)], { type: 'application/json' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'gdhistogram-report-' + analysisResults.fileId + '.json';
+            a.click();
+        }
+        
+        function exportPDF() {
+            if (typeof window.jspdf === 'undefined') {
+                alert('PDF library not loaded. Please try again or use JSON export.');
+                return;
+            }
+            
+            const jsPDF = window.jspdf.jsPDF;
+            const pdf = new jsPDF('p', 'mm', 'a4');
+            const { docInfo, metrics, anomalies, currentContent, analyzedAt } = analysisResults;
+            
+            const pageWidth = 210;
+            const margin = 20;
+            const contentWidth = pageWidth - 2 * margin;
+            let y = 25;
+            
+            const addLine = function(text, size, isBold) {
+                size = size || 10;
+                isBold = isBold || false;
+                if (y > 270) { pdf.addPage(); y = 25; }
+                pdf.setFontSize(size);
+                pdf.setFont('helvetica', isBold ? 'bold' : 'normal');
+                const safeText = String(text || '').replace(/[^\x00-\x7F]/g, '');
+                const lines = pdf.splitTextToSize(safeText, contentWidth);
+                pdf.text(lines, margin, y);
+                y += lines.length * (size * 0.4) + 2;
+            };
+            
+            const addSpace = function(mm) { y += (mm || 5); };
+            
+            const addSection = function(title) {
+                if (y > 250) { pdf.addPage(); y = 25; }
+                addSpace(8);
+                pdf.setDrawColor(200);
+                pdf.line(margin, y, pageWidth - margin, y);
+                y += 6;
+                addLine(title, 14, true);
+                addSpace(2);
+            };
+            
+            // TITLE
+            pdf.setFontSize(22);
+            pdf.setFont('helvetica', 'bold');
+            pdf.text('GDHistogram Analysis Report', margin, y);
+            y += 10;
+            
+            pdf.setFontSize(10);
+            pdf.setFont('helvetica', 'normal');
+            pdf.setTextColor(100);
+            pdf.text('Generated on ' + new Date().toLocaleString(), margin, y);
+            pdf.setTextColor(0);
+            y += 12;
+            
+            // DOCUMENT INFO
+            addSection('Document Information');
+            addLine('Document Title: ' + (docInfo.name || 'Unknown'), 11, true);
+            addLine('Created: ' + new Date(docInfo.createdTime).toLocaleString());
+            addLine('Last Modified: ' + new Date(docInfo.modifiedTime).toLocaleString());
+            addLine('Owner: ' + (docInfo.owners && docInfo.owners[0] ? docInfo.owners[0].displayName : 'Unknown'));
+            addLine('Total Revisions Analyzed: ' + (metrics.length + 1));
+            
+            const wordCount = currentContent.split(/\s+/).filter(function(w) { return w.length > 0; }).length;
+            addLine('Current Word Count: ' + wordCount.toLocaleString() + ' words');
+            
+            // EXECUTIVE SUMMARY
+            addSection('Executive Summary');
+            
+            const highSeverity = anomalies.filter(function(a) { return a.severity === 'high'; });
+            const medSeverity = anomalies.filter(function(a) { return a.severity === 'medium'; });
+            const lowSeverity = anomalies.filter(function(a) { return a.severity === 'low'; });
+            
+            if (anomalies.length === 0) {
+                addLine('This document demonstrates consistent typing patterns throughout its entire revision history. The analysis did not detect any significant statistical anomalies that would suggest copy-paste behavior, AI-generated content insertion, or other irregular editing patterns.');
+                addSpace(3);
+                addLine('The revision timestamps and character-per-minute rates fall within expected ranges for human typing behavior. This suggests the document was composed organically with typical editing patterns.');
+                addSpace(3);
+                addLine('CONCLUSION: The revision history appears authentic and consistent with normal human typing and editing behavior.', 10, true);
+            } else {
+                addLine('This comprehensive analysis identified ' + anomalies.length + ' statistical anomalies within the documents revision history. These anomalies represent deviations from typical human typing patterns and warrant further examination.');
+                addSpace(3);
+                addLine('Anomaly Breakdown:', 10, true);
+                addLine('- High Severity: ' + highSeverity.length + ' instances (patterns strongly suggesting non-typed content)');
+                addLine('- Medium Severity: ' + medSeverity.length + ' instances (unusual patterns worth investigation)');
+                addLine('- Low Severity: ' + lowSeverity.length + ' instances (minor deviations from typical patterns)');
+                addSpace(3);
+                
+                if (highSeverity.length > 0) {
+                    addLine('ATTENTION: High-severity anomalies were detected. This may indicate:', 10, true);
+                    addLine('- Content that was copy-pasted from external sources such as other documents or websites');
+                    addLine('- Text generated by AI tools (ChatGPT, Claude, etc.) and inserted into the document');
+                    addLine('- Collaborative editing where large amounts of content were added in bulk');
+                    addLine('- Use of templates or pre-written content blocks');
+                }
+            }
+            
+            // STATISTICAL ANALYSIS
+            addSection('Statistical Analysis');
+            
+            const cpms = metrics.filter(function(m) { return m.cpm > 0 && m.cpm < 5000; }).map(function(m) { return m.cpm; });
+            const avgCpm = cpms.length > 0 ? cpms.reduce(function(a, b) { return a + b; }, 0) / cpms.length : 0;
+            const stdCpm = cpms.length > 0 ? Math.sqrt(cpms.reduce(function(a, b) { return a + Math.pow(b - avgCpm, 2); }, 0) / cpms.length) : 0;
+            const maxCpm = cpms.length > 0 ? Math.max.apply(null, cpms) : 0;
+            const minCpm = cpms.length > 0 ? Math.min.apply(null, cpms) : 0;
+            
+            addLine('Typing Speed Analysis (Characters Per Minute):', 11, true);
+            addLine('- Average Speed: ' + avgCpm.toFixed(1) + ' CPM (approximately ' + (avgCpm / 5).toFixed(0) + ' WPM)');
+            addLine('- Standard Deviation: ' + stdCpm.toFixed(1) + ' CPM');
+            addLine('- Range: ' + minCpm.toFixed(0) + ' to ' + maxCpm.toFixed(0) + ' CPM');
+            addSpace(3);
+            
+            addLine('Reference Typing Speeds:', 10, true);
+            addLine('- Normal human typing: 150-400 CPM (30-80 WPM)');
+            addLine('- Professional typist: 400-600 CPM (80-120 WPM)');
+            addLine('- Speeds above 1000 CPM typically indicate pasted or generated content');
+            addSpace(3);
+            
+            addLine('Methodology:', 10, true);
+            addLine('This analysis uses statistical z-scores to detect anomalies. A z-score measures how many standard deviations a value is from the mean. Values beyond 1.5 standard deviations are flagged as potential anomalies, with higher z-scores indicating greater deviation from normal patterns.');
+            
+            // DETAILED ANOMALY REPORT
+            if (anomalies.length > 0) {
+                addSection('Detailed Anomaly Report');
+                
+                addLine('The following anomalies were detected during analysis. Each entry includes the type of anomaly, when it occurred, its statistical significance, and an interpretation of what it may indicate.');
+                addSpace(3);
+                
+                anomalies.slice(0, 15).forEach(function(a, i) {
+                    if (y > 250) { pdf.addPage(); y = 25; }
+                    
+                    addLine('Anomaly #' + (i + 1) + ': ' + a.type, 11, true);
+                    addLine('Severity Level: ' + a.severity.toUpperCase());
+                    addLine('Timestamp: ' + a.timestamp.toLocaleString());
+                    addLine('Statistical Deviation: ' + (a.zScore ? a.zScore.toFixed(2) + ' standard deviations from mean' : 'N/A'));
+                    addLine('Finding: ' + a.reason);
+                    addLine('Interpretation: ' + a.interpretation);
+                    addSpace(4);
+                });
+                
+                if (anomalies.length > 15) {
+                    addLine('... and ' + (anomalies.length - 15) + ' additional anomalies (see JSON export for complete data)');
+                }
+            }
+            
+            // REVISION TIMELINE
+            addSection('Revision Timeline Summary');
+            
+            addLine('This section provides a chronological overview of document revisions, showing the pattern of edits over time.');
+            addSpace(3);
+            
+            var first5 = metrics.slice(0, 5);
+            addLine('First 5 Revisions:', 10, true);
+            first5.forEach(function(m, i) {
+                var sign = m.sizeChange > 0 ? '+' : '';
+                addLine((i + 2) + '. ' + m.timestamp.toLocaleString() + ' - ' + sign + m.sizeChange + ' chars @ ' + m.cpm.toFixed(0) + ' CPM by ' + m.user);
+            });
+            
+            if (metrics.length > 10) {
+                addSpace(2);
+                addLine('... ' + (metrics.length - 10) + ' additional revisions ...');
+                addSpace(2);
+            }
+            
+            if (metrics.length > 5) {
+                var last5 = metrics.slice(-5);
+                addLine('Last 5 Revisions:', 10, true);
+                last5.forEach(function(m, i) {
+                    var revNum = metrics.length - 5 + i + 2;
+                    var sign = m.sizeChange > 0 ? '+' : '';
+                    addLine(revNum + '. ' + m.timestamp.toLocaleString() + ' - ' + sign + m.sizeChange + ' chars @ ' + m.cpm.toFixed(0) + ' CPM by ' + m.user);
+                });
+            }
+            
+            // DISCLAIMER
+            addSection('Disclaimer and Limitations');
+            
+            addLine('This report is generated automatically based on statistical analysis of Google Docs revision metadata. The analysis examines patterns in typing speed and content changes to identify potential anomalies that deviate from typical human typing behavior.');
+            addSpace(3);
+            
+            addLine('Important Considerations:', 10, true);
+            addLine('- High typing speeds may have legitimate explanations including autocomplete, templates, or dictation');
+            addLine('- This analysis cannot definitively prove or disprove AI usage or plagiarism');
+            addLine('- Results should be interpreted in context and verified through other means');
+            addLine('- Collaborative documents may show unusual patterns due to multiple editors');
+            addLine('- Some revisions may be grouped by Google Docs, affecting the granularity of the analysis');
+            addSpace(3);
+            
+            addLine('This tool is intended for educational and informational purposes. Any conclusions drawn from this report should be corroborated with additional evidence before taking action.');
+            
+            addSpace(8);
+            pdf.setFontSize(9);
+            pdf.setTextColor(150);
+            pdf.text('Report ID: ' + analysisResults.fileId, margin, y);
+            y += 4;
+            pdf.text('Analysis Timestamp: ' + analyzedAt, margin, y);
+            pdf.text('Generated by GDHistogram', margin, y + 4);
+            
+            // Save
+            var safeName = (docInfo.name || analysisResults.fileId).replace(/[^a-z0-9]/gi, '-').substring(0, 50);
+            pdf.save('GDHistogram-Report-' + safeName + '.pdf');
+        }
+    </script>
+</body>
+</html>
