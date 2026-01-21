@@ -3,8 +3,10 @@
 import os
 import json
 import threading
+import time
 from pathlib import Path
 from datetime import datetime
+from collections import defaultdict
 from flask import Flask, render_template_string, request, jsonify, redirect, url_for, session
 import secrets
 
@@ -19,9 +21,127 @@ from gdhistogram.analysis.metrics_engine import MetricsEngine
 from gdhistogram.analysis.event_detector import EventDetector
 from gdhistogram.storage.database import Database, CacheManager
 from gdhistogram.visualization.histogram import HistogramGenerator
+from gdhistogram.embedded_credentials import EMBEDDED_CLIENT_CONFIG, RATE_LIMIT_PER_IP, RATE_LIMIT_WINDOW, CREDENTIALS_CONFIGURED
 
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(32)
+
+# Rate limiting storage: {ip: [(timestamp, count), ...]}
+rate_limit_data = defaultdict(list)
+rate_limit_lock = threading.Lock()
+
+
+def get_client_ip():
+    """Get the client's IP address."""
+    if request.headers.get('X-Forwarded-For'):
+        return request.headers.get('X-Forwarded-For').split(',')[0].strip()
+    return request.remote_addr or '127.0.0.1'
+
+
+def check_rate_limit():
+    """Check if the current IP is rate limited. Returns (allowed, remaining, reset_time)."""
+    ip = get_client_ip()
+    now = time.time()
+    
+    with rate_limit_lock:
+        # Clean old entries
+        rate_limit_data[ip] = [t for t in rate_limit_data[ip] if now - t < RATE_LIMIT_WINDOW]
+        
+        # Check limit
+        count = len(rate_limit_data[ip])
+        remaining = max(0, RATE_LIMIT_PER_IP - count)
+        
+        if count >= RATE_LIMIT_PER_IP:
+            # Find when the oldest entry expires
+            oldest = min(rate_limit_data[ip]) if rate_limit_data[ip] else now
+            reset_time = int(oldest + RATE_LIMIT_WINDOW - now)
+            return False, 0, reset_time
+        
+        return True, remaining, 0
+
+
+def record_usage():
+    """Record an API usage for rate limiting."""
+    ip = get_client_ip()
+    now = time.time()
+    
+    with rate_limit_lock:
+        rate_limit_data[ip].append(now)
+
+
+class WebOAuthManager:
+    """Simple OAuth manager for web-based flow (copy-paste auth code)."""
+    
+    SCOPES = [
+        'https://www.googleapis.com/auth/drive.readonly',
+        'https://www.googleapis.com/auth/documents.readonly',
+    ]
+    
+    def __init__(self, secrets_path=None, client_config=None):
+        """Initialize with either a secrets file path or direct config dict."""
+        if client_config:
+            self.client_config = client_config
+        elif secrets_path:
+            import json
+            with open(secrets_path) as f:
+                self.client_config = json.load(f)
+        else:
+            raise ValueError("Must provide either secrets_path or client_config")
+        
+        # Extract the credentials from installed or web format
+        if "installed" in self.client_config:
+            self.creds_info = self.client_config["installed"]
+        elif "web" in self.client_config:
+            self.creds_info = self.client_config["web"]
+        else:
+            self.creds_info = self.client_config
+    
+    def get_authorization_url(self):
+        """Generate the OAuth authorization URL."""
+        from urllib.parse import urlencode
+        
+        params = {
+            'client_id': self.creds_info['client_id'],
+            'redirect_uri': 'urn:ietf:wg:oauth:2.0:oob',
+            'response_type': 'code',
+            'scope': ' '.join(self.SCOPES),
+            'access_type': 'offline',
+            'prompt': 'consent',
+        }
+        
+        return f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}"
+    
+    def exchange_code(self, auth_code):
+        """Exchange authorization code for credentials."""
+        from google.oauth2.credentials import Credentials
+        import requests
+        
+        token_url = "https://oauth2.googleapis.com/token"
+        data = {
+            'code': auth_code,
+            'client_id': self.creds_info['client_id'],
+            'client_secret': self.creds_info['client_secret'],
+            'redirect_uri': 'urn:ietf:wg:oauth:2.0:oob',
+            'grant_type': 'authorization_code',
+        }
+        
+        response = requests.post(token_url, data=data)
+        if response.status_code != 200:
+            raise Exception(f"Token exchange failed: {response.text}")
+        
+        token_data = response.json()
+        
+        credentials = Credentials(
+            token=token_data['access_token'],
+            refresh_token=token_data.get('refresh_token'),
+            token_uri=token_url,
+            client_id=self.creds_info['client_id'],
+            client_secret=self.creds_info['client_secret'],
+            scopes=self.SCOPES,
+        )
+        
+        return credentials
+
 
 # Global state
 state = {
@@ -32,6 +152,7 @@ state = {
     "config": DEFAULT_CONFIG,
     "analysis_results": None,
     "histogram_html": None,
+    "using_embedded_credentials": CREDENTIALS_CONFIGURED,
 }
 
 # HTML Templates
@@ -181,7 +302,14 @@ WELCOME_TEMPLATE = """
         <div class="alert alert-info">
             <strong>Privacy First:</strong> All analysis happens locally. We never store or transmit your document content.
         </div>
-        <a href="/setup" class="btn">Get Started →</a>
+        <div class="alert alert-success">
+            <strong>✓ Ready to use!</strong> No setup required. Rate limited to {{ rate_limit }} analyses per day.
+            {% if remaining is defined %}You have <strong>{{ remaining }}</strong> remaining today.{% endif %}
+        </div>
+        <a href="/auth" class="btn">Get Started →</a>
+        <p style="margin-top: 15px; font-size: 0.9em; color: #888;">
+            <a href="/setup" style="color: #888;">Or use your own Google Cloud credentials →</a>
+        </p>
     </div>
 </div>
 {% endblock %}
@@ -234,7 +362,7 @@ AUTH_TEMPLATE = """
 <div class="container">
     <div class="steps">
         <span class="step done">Welcome</span>
-        <span class="step done">Setup</span>
+        {% if using_own_credentials %}<span class="step done">Setup</span>{% endif %}
         <span class="step active">Auth</span>
         <span class="step">Document</span>
         <span class="step">Analyze</span>
@@ -247,7 +375,12 @@ AUTH_TEMPLATE = """
             We only request <strong>read-only</strong> access. GDHistogram cannot modify your documents.
         </div>
         
-        {% if auth_url %}
+        {% if rate_limited %}
+        <div class="alert alert-error">
+            <strong>Rate limit reached!</strong> You've used all {{ rate_limit }} analyses for today.
+            Try again in {{ reset_hours }} hours, or <a href="/setup">use your own credentials</a> for unlimited access.
+        </div>
+        {% elif auth_url %}
         <p style="margin: 20px 0;">
             <a href="{{ auth_url }}" target="_blank" class="btn">Open Google Authorization →</a>
         </p>
@@ -452,7 +585,15 @@ def render(template_name, **kwargs):
 
 @app.route("/")
 def index():
-    return render("welcome", title="Welcome")
+    allowed, remaining, reset_time = check_rate_limit()
+    reset_hours = int((reset_time - time.time()) / 3600) + 1 if reset_time else 24
+    return render("welcome", 
+                  title="Welcome",
+                  using_embedded=state["using_embedded_credentials"],
+                  rate_limit=RATE_LIMIT_PER_IP,
+                  remaining=remaining,
+                  rate_limited=not allowed,
+                  reset_hours=reset_hours)
 
 
 @app.route("/setup", methods=["GET", "POST"])
@@ -486,11 +627,34 @@ def setup():
 
 @app.route("/auth", methods=["GET"])
 def auth():
+    # Check rate limit when using embedded credentials
+    if state["using_embedded_credentials"]:
+        allowed, remaining, reset_time = check_rate_limit()
+        reset_hours = int((reset_time - time.time()) / 3600) + 1 if reset_time else 24
+        
+        if not allowed:
+            return render("auth", title="Authorize", 
+                          rate_limited=True,
+                          rate_limit=RATE_LIMIT_PER_IP,
+                          reset_hours=reset_hours)
+        
+        # Use embedded credentials
+        try:
+            oauth = WebOAuthManager(None, client_config=EMBEDDED_CLIENT_CONFIG)
+            auth_url = oauth.get_authorization_url()
+            return render("auth", title="Authorize", 
+                          auth_url=auth_url,
+                          rate_limit=RATE_LIMIT_PER_IP,
+                          remaining=remaining)
+        except Exception as e:
+            return render("auth", title="Authorize", error=str(e))
+    
+    # Fallback to user's own credentials
     if not state["client_secrets_path"]:
         return redirect(url_for("setup"))
     
     try:
-        oauth = OAuthManager(state["client_secrets_path"])
+        oauth = WebOAuthManager(state["client_secrets_path"])
         auth_url = oauth.get_authorization_url()
         return render("auth", title="Authorize", auth_url=auth_url)
     except Exception as e:
@@ -504,7 +668,12 @@ def auth_callback():
         return render("auth", title="Authorize", error="Please enter the authorization code")
     
     try:
-        oauth = OAuthManager(state["client_secrets_path"])
+        # Use embedded credentials if enabled
+        if state["using_embedded_credentials"]:
+            oauth = WebOAuthManager(None, client_config=EMBEDDED_CLIENT_CONFIG)
+        else:
+            oauth = WebOAuthManager(state["client_secrets_path"])
+        
         credentials = oauth.exchange_code(auth_code)
         state["credentials"] = credentials
         
@@ -514,7 +683,11 @@ def auth_callback():
         
         return redirect(url_for("document"))
     except Exception as e:
-        oauth = OAuthManager(state["client_secrets_path"])
+        # Use embedded credentials if enabled
+        if state["using_embedded_credentials"]:
+            oauth = WebOAuthManager(None, client_config=EMBEDDED_CLIENT_CONFIG)
+        else:
+            oauth = WebOAuthManager(state["client_secrets_path"])
         auth_url = oauth.get_authorization_url()
         return render("auth", title="Authorize", auth_url=auth_url, error=str(e))
 
@@ -557,6 +730,17 @@ def document():
 def analyze():
     if not state["file_id"]:
         return redirect(url_for("document"))
+    
+    # Check rate limit for embedded credentials
+    if state["using_embedded_credentials"]:
+        allowed, remaining, reset_time = check_rate_limit()
+        if not allowed:
+            reset_hours = int(reset_time / 3600) + 1
+            return render("document", title="Document", 
+                          error=f"Rate limit reached! Try again in {reset_hours} hours or use your own credentials.")
+        # Record usage when starting a new analysis
+        if state.get("analysis_results") is None:
+            record_usage()
     
     # Start analysis in background
     if state.get("analysis_results") is None:
