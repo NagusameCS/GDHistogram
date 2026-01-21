@@ -248,11 +248,10 @@
             document.getElementById('origin-url').textContent = window.location.origin;
             document.getElementById('redirect-url').textContent = REDIRECT_URI;
             
-            // Load saved client ID
+            // Load saved client ID or use default
             const savedClientId = localStorage.getItem('gdhistogram_client_id');
-            if (savedClientId) {
-                document.getElementById('client-id-input').value = savedClientId;
-            }
+            const defaultClientId = '646422605911-bgm9u4pkeo9908e6c9euaqugshdua9tj.apps.googleusercontent.com';
+            document.getElementById('client-id-input').value = savedClientId || defaultClientId;
             
             // Check for OAuth callback
             const hash = window.location.hash;
