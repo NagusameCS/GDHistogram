@@ -109,8 +109,8 @@
         .event-badge.medium { background: #fffbeb; border-color: #fde68a; color: #92400e; }
         .event-badge.low { background: #f0fdf4; border-color: #bbf7d0; color: #166534; }
         
-        #histogram { width: 100%; height: 350px; margin: 24px 0; background: #f9f9f9; border-radius: 8px; }
-        #timeline { width: 100%; height: 250px; margin: 24px 0; background: #f9f9f9; border-radius: 8px; }
+        #wpm-chart { width: 100%; height: 400px; margin: 24px 0; background: #f9f9f9; border-radius: 8px; }
+        #timeline { width: 100%; height: 200px; margin: 24px 0; background: #f9f9f9; border-radius: 8px; }
         
         .actions { display: flex; gap: 12px; margin-top: 32px; flex-wrap: wrap; }
         
@@ -191,10 +191,11 @@
             <div class="stats-grid" id="stats-grid"></div>
             <div class="divider"></div>
             
-            <h2>WPM Distribution by Session</h2>
-            <div id="histogram"></div>
+            <h2>Typing Speed Over Time</h2>
+            <p style="font-size:13px;color:#666;margin-top:-8px;">WPM by minute - gaps show periods of inactivity (0 WPM)</p>
+            <div id="wpm-chart"></div>
             
-            <h2>Writing Timeline</h2>
+            <h2>Words Written Per Session</h2>
             <div id="timeline"></div>
             
             <div class="divider"></div>
@@ -580,12 +581,13 @@
             var totalActiveMinutes = sessions.reduce(function(a, s) { return a + s.activeMinutes; }, 0);
             var wpms = sessions.filter(function(s) { return s.wpm > 0 && s.wpm < 200; }).map(function(s) { return s.wpm; });
             var avgWpm = wpms.length > 0 ? wpms.reduce(function(a, b) { return a + b; }, 0) / wpms.length : 0;
+            var peakWpm = wpms.length > 0 ? Math.max.apply(null, wpms) : 0;
             
             document.getElementById('stats-grid').innerHTML = 
                 '<div class="stat-card"><div class="stat-value">' + totalWords.toLocaleString() + '</div><div class="stat-label">Words</div></div>' +
-                '<div class="stat-card"><div class="stat-value">' + sessions.length + '</div><div class="stat-label">Sessions</div></div>' +
                 '<div class="stat-card"><div class="stat-value">' + avgWpm.toFixed(0) + '</div><div class="stat-label">Avg WPM</div></div>' +
-                '<div class="stat-card"><div class="stat-value">' + anomalies.length + '</div><div class="stat-label">Anomalies</div></div>';
+                '<div class="stat-card"><div class="stat-value" style="color:' + (peakWpm > 80 ? '#ef4444' : '#1a1a1a') + '">' + peakWpm.toFixed(0) + '</div><div class="stat-label">Peak WPM</div></div>' +
+                '<div class="stat-card"><div class="stat-value" style="color:' + (anomalies.length > 0 ? '#ef4444' : '#22c55e') + '">' + anomalies.length + '</div><div class="stat-label">Anomalies</div></div>';
             
             // Show warning if limited data
             var warningDiv = document.getElementById('data-warning');
@@ -596,8 +598,8 @@
                 warningDiv.classList.add('hidden');
             }
             
-            // WPM Histogram
-            renderHistogram(wpms);
+            // WPM Time Series Chart
+            renderWpmChart(sessions);
             
             // Timeline
             renderTimeline(sessions);
@@ -609,37 +611,134 @@
             renderAnomalies(anomalies);
         }
         
-        function renderHistogram(wpms) {
-            var histogramDiv = document.getElementById('histogram');
+        function generateWpmTimeSeries(sessions) {
+            // Create minute-by-minute WPM data with 0s for gaps
+            if (sessions.length === 0) return { times: [], wpms: [] };
             
-            if (wpms.length === 0 || typeof Plotly === 'undefined') {
-                histogramDiv.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#999;text-align:center;padding:40px;"><div>Not enough session data for histogram.<br>The document needs more editing sessions with time gaps.</div></div>';
+            var allTimes = [];
+            var allWpms = [];
+            
+            // Get the full time range
+            var minTime = sessions[0].startTime.getTime();
+            var maxTime = sessions[sessions.length - 1].endTime.getTime();
+            
+            // Create a map of active minutes to WPM values
+            var minuteWpmMap = {};
+            
+            for (var i = 0; i < sessions.length; i++) {
+                var s = sessions[i];
+                var startMin = Math.floor(s.startTime.getTime() / 60000);
+                var endMin = Math.floor(s.endTime.getTime() / 60000);
+                var sessionDuration = Math.max(1, endMin - startMin);
+                
+                // Spread the WPM across all minutes in the session
+                for (var m = startMin; m <= endMin; m++) {
+                    minuteWpmMap[m] = s.wpm;
+                }
+            }
+            
+            // Generate the time series with minute resolution
+            // But only include ranges around sessions (not huge gaps)
+            var sessionRanges = [];
+            for (var i = 0; i < sessions.length; i++) {
+                var s = sessions[i];
+                var startMin = Math.floor(s.startTime.getTime() / 60000) - 5; // 5 min before
+                var endMin = Math.floor(s.endTime.getTime() / 60000) + 5; // 5 min after
+                
+                // Merge with previous range if overlapping
+                if (sessionRanges.length > 0 && startMin <= sessionRanges[sessionRanges.length - 1].end + 60) {
+                    sessionRanges[sessionRanges.length - 1].end = endMin;
+                } else {
+                    sessionRanges.push({ start: startMin, end: endMin, sessionIdx: i });
+                }
+            }
+            
+            // Build the time series
+            for (var r = 0; r < sessionRanges.length; r++) {
+                var range = sessionRanges[r];
+                
+                // Add a gap marker if not the first range
+                if (r > 0) {
+                    allTimes.push(null); // Creates a gap in the line
+                    allWpms.push(null);
+                }
+                
+                for (var m = range.start; m <= range.end; m++) {
+                    var time = new Date(m * 60000);
+                    var wpm = minuteWpmMap[m] || 0;
+                    allTimes.push(time);
+                    allWpms.push(wpm);
+                }
+            }
+            
+            return { times: allTimes, wpms: allWpms };
+        }
+        
+        function renderWpmChart(sessions) {
+            var chartDiv = document.getElementById('wpm-chart');
+            
+            if (sessions.length === 0 || typeof Plotly === 'undefined') {
+                chartDiv.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#999;text-align:center;padding:40px;"><div>Not enough data for WPM chart.<br>The document needs more editing activity.</div></div>';
+                return;
+            }
+            
+            var timeSeries = generateWpmTimeSeries(sessions);
+            
+            if (timeSeries.times.length === 0) {
+                chartDiv.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#999;">No timeline data available</div>';
                 return;
             }
             
             try {
-                Plotly.newPlot('histogram', [{
-                    x: wpms,
-                    type: 'histogram',
-                    marker: { color: '#1a1a1a' },
-                    nbinsx: Math.max(5, Math.min(20, wpms.length))
+                Plotly.newPlot('wpm-chart', [{
+                    x: timeSeries.times,
+                    y: timeSeries.wpms,
+                    type: 'scatter',
+                    mode: 'lines',
+                    fill: 'tozeroy',
+                    fillcolor: 'rgba(26, 26, 26, 0.15)',
+                    line: { 
+                        color: '#1a1a1a', 
+                        width: 2,
+                        shape: 'spline',
+                        smoothing: 0.8
+                    },
+                    hovertemplate: '%{x|%b %d, %H:%M}<br><b>%{y:.0f} WPM</b><extra></extra>'
                 }], {
-                    xaxis: { title: 'Words Per Minute (WPM)', gridcolor: '#e5e5e5' },
-                    yaxis: { title: 'Number of Sessions', gridcolor: '#e5e5e5' },
-                    margin: { t: 30, r: 30, b: 60, l: 60 },
+                    xaxis: { 
+                        title: 'Time',
+                        gridcolor: '#e5e5e5',
+                        tickformat: '%b %d\n%H:%M',
+                        showgrid: true
+                    },
+                    yaxis: { 
+                        title: 'Words Per Minute (WPM)',
+                        gridcolor: '#e5e5e5',
+                        zeroline: true,
+                        zerolinecolor: '#ccc',
+                        rangemode: 'tozero'
+                    },
+                    margin: { t: 30, r: 30, b: 70, l: 60 },
                     paper_bgcolor: 'transparent',
                     plot_bgcolor: 'transparent',
-                    bargap: 0.1,
                     font: { family: 'system-ui, sans-serif', color: '#1a1a1a' },
                     shapes: [
-                        { type: 'line', x0: 50, x1: 50, y0: 0, y1: 1, yref: 'paper', line: { color: '#22c55e', width: 2, dash: 'dot' } },
-                        { type: 'line', x0: 80, x1: 80, y0: 0, y1: 1, yref: 'paper', line: { color: '#eab308', width: 2, dash: 'dot' } },
-                        { type: 'line', x0: 120, x1: 120, y0: 0, y1: 1, yref: 'paper', line: { color: '#ef4444', width: 2, dash: 'dot' } }
+                        // Normal typing threshold (50 WPM)
+                        { type: 'line', x0: 0, x1: 1, xref: 'paper', y0: 50, y1: 50, line: { color: '#22c55e', width: 1.5, dash: 'dot' } },
+                        // Warning threshold (80 WPM)
+                        { type: 'line', x0: 0, x1: 1, xref: 'paper', y0: 80, y1: 80, line: { color: '#eab308', width: 1.5, dash: 'dot' } },
+                        // Suspicious threshold (120 WPM)
+                        { type: 'line', x0: 0, x1: 1, xref: 'paper', y0: 120, y1: 120, line: { color: '#ef4444', width: 1.5, dash: 'dot' } }
+                    ],
+                    annotations: [
+                        { x: 1.02, y: 50, xref: 'paper', yref: 'y', text: 'Normal', showarrow: false, font: { size: 10, color: '#22c55e' } },
+                        { x: 1.02, y: 80, xref: 'paper', yref: 'y', text: 'Fast', showarrow: false, font: { size: 10, color: '#eab308' } },
+                        { x: 1.02, y: 120, xref: 'paper', yref: 'y', text: 'Suspicious', showarrow: false, font: { size: 10, color: '#ef4444' } }
                     ]
                 }, { responsive: true, displayModeBar: false });
             } catch (e) {
-                console.error('Histogram error:', e);
-                histogramDiv.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#999;">Chart unavailable</div>';
+                console.error('WPM chart error:', e);
+                chartDiv.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#999;">Chart unavailable</div>';
             }
         }
         
@@ -811,6 +910,14 @@
             var wordCount = currentContent.split(/\s+/).filter(function(w) { return w.length > 0; }).length;
             addLine('Current Word Count: ' + wordCount.toLocaleString() + ' words');
             
+            // Calculate additional stats
+            var maxWpm = wpms.length > 0 ? Math.max.apply(null, wpms) : 0;
+            var minWpm = wpms.length > 0 ? Math.min.apply(null, wpms) : 0;
+            var totalActiveMinutes = sessions.reduce(function(a, s) { return a + s.activeMinutes; }, 0);
+            
+            addLine('Total Active Writing Time: ' + formatDuration(totalActiveMinutes));
+            addLine('WPM Range: ' + minWpm.toFixed(0) + ' - ' + maxWpm.toFixed(0) + ' WPM');
+            
             // Executive Summary
             addSection('Executive Summary');
             
@@ -818,13 +925,11 @@
             var medSeverity = anomalies.filter(function(a) { return a.severity === 'medium'; });
             var lowSeverity = anomalies.filter(function(a) { return a.severity === 'low'; });
             
-            var wpms = sessions.filter(function(s) { return s.wpm > 0 && s.wpm < 200; }).map(function(s) { return s.wpm; });
-            var avgWpm = wpms.length > 0 ? wpms.reduce(function(a, b) { return a + b; }, 0) / wpms.length : 0;
-            
             addLine('This document was analyzed for typing patterns and anomalies. The analysis examined ' + sessions.length + ' distinct writing sessions across ' + analysisResults.revisions.length + ' revisions.');
             addSpace(3);
             
             addLine('Average Typing Speed: ' + avgWpm.toFixed(0) + ' WPM', 10, true);
+            addLine('Peak Typing Speed: ' + maxWpm.toFixed(0) + ' WPM', 10, true);
             addLine('Normal human typing speed ranges from 30-50 WPM. Professional typists may reach 60-80 WPM. Speeds above 80 WPM are unusual and may indicate copy-paste or AI-generated content.');
             addSpace(3);
             
