@@ -35,7 +35,25 @@ The application provides an 8-screen linear flow:
 - Python 3.11 or higher
 - A Google Cloud account (free tier works)
 
-### Quick Start
+### Quick Start (GitHub Codespaces - Recommended)
+
+The easiest way to run GDHistogram is in GitHub Codespaces with the web interface:
+
+1. **Open in Codespaces**: Click the green "Code" button → "Codespaces" → "Create codespace"
+
+2. **Install dependencies**:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. **Run the web interface**:
+   ```bash
+   python -m gdhistogram --web
+   ```
+
+4. **Access the app**: Codespaces will show a popup to open port 5000 in your browser
+
+### Quick Start (Local)
 
 1. **Clone the repository**:
    ```bash
@@ -56,14 +74,28 @@ The application provides an 8-screen linear flow:
 
 4. **Run the application**:
    ```bash
-   python run.py
+   python run.py           # Desktop UI (requires PySide6/OpenGL)
+   python run.py --web     # Web UI (works everywhere)
    ```
 
 ### Installation via pip
 
 ```bash
 pip install -e .
-gdhistogram  # Run the application
+gdhistogram          # Run desktop UI
+gdhistogram --web    # Run web UI (great for servers/Codespaces)
+```
+
+### Command Line Options
+
+```
+python -m gdhistogram [OPTIONS]
+
+Options:
+  --web          Run web-based interface (works in Codespaces)
+  --port PORT    Port for web interface (default: 5000)
+  --check-deps   Check if all dependencies are installed
+  --version      Show version information
 ```
 
 ## Google Cloud Setup
@@ -188,8 +220,9 @@ GDHistogram
 │   ├── analysis/       # Diff, metrics, and event detection
 │   ├── storage/        # SQLite caching
 │   ├── visualization/  # Plotly histogram generation
-│   └── ui/             # PySide6 interface
-│       └── screens/    # Individual UI screens
+│   ├── ui/             # PySide6 desktop interface
+│   │   └── screens/    # Individual UI screens
+│   └── web_app.py      # Flask web interface (Codespaces compatible)
 ```
 
 ### Key Components
