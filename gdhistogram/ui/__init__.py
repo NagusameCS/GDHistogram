@@ -1,5 +1,9 @@
 """UI module for GDHistogram."""
 
-from gdhistogram.ui.app import GDHistogramApp
+# Lazy import to avoid loading PySide6 at module import time
+def get_app():
+    """Get the GDHistogramApp class."""
+    from gdhistogram.ui.app import GDHistogramApp
+    return GDHistogramApp
 
-__all__ = ["GDHistogramApp"]
+__all__ = ["get_app"]
